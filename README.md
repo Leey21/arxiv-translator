@@ -23,8 +23,8 @@ Skill 会引导 Agent：
 
 1. 拉取 arXiv LaTeX；无源码则说明并跳过。
 2. 翻译正文，公式、引用、标签、图表路径与常用学术英文词保留不译。
-3. 主文件 `\begin{document}` 前插入编译所需库与中文支持。
-4. `scripts/compile.py` 提交在线 LuaLaTeX 编译，生成 PDF。
+3. 主文件 `\begin{document}` 前插入编译所需库与中文支持，并复用 arXiv 源码自带的 `.bbl` 以保证引用可解析。
+4. `scripts/compile.py` 提交在线 LuaLaTeX 编译，生成 PDF。编译成功后默认保留 `.tmp_arxiv` 工作目录，便于检查 PDF 后继续微调；确认无误后可再调用 `cleanup.py` 清理。
 
 本地仅需：Python 3 与 `requests`（`pip install requests`）。无需在本地配置任何 LaTeX 编译环境。
 
@@ -79,7 +79,7 @@ arxiv-translator/
 │   ├── download.py          # 按 arXiv ID 下载 e-print 并解压到工作目录
 │   ├── inspect_tex.py       # 扫描正文中可能未翻译的英文片段（辅助检查）
 │   ├── compile.py           # 将工作目录打包提交在线编译，写出 PDF
-│   └── cleanup.py           # 删除单篇论文的 .tmp_arxiv/<ID> 工作目录（该篇编译成功后调用）
+│   └── cleanup.py           # 删除 .tmp_arxiv 工作目录；可选先备份翻译后的 .tex/.bbl
 └── references/
     └── compile-errors.md    # 编译失败时的排查参考
 ```

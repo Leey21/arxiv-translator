@@ -82,15 +82,21 @@ python3 {SKILL_DIR}/scripts/compile.py "$WORK_DIR" "$MAIN_TEX" "$OUTPUT_DIR/$PDF
 `compile.py` 会统一完成以下编译前处理：
 - 若检测到中文且主文件尚无 CJK 支持，自动在主文件 preamble 中补入 LuaLaTeX 所需中文支持；
 - 自动注释掉与 Unicode 编译栈冲突的 `fontenc` / `inputenc`；
-- 自动识别 `bibtex` / `biber` / 已内置 `.bbl` 的情况；
+- 若源码自带 `.bbl`，自动将其内联到 `\bibliography{...}` 位置，避免远端单遍编译后引用显示为 `?`；
 - 自动忽略常见编译中间文件与未被源码引用的游离 PDF，避免把无关产物上传到远端编译服务。
 
 编译失败时：读取 stderr 中的错误日志，参考 `references/compile-errors.md` 修复源码，重新编译（最多重试 2 次）。
 
-编译成功后清理掉中间文件：
+编译成功后默认保留 `$OUTPUT_DIR/.tmp_arxiv`，方便用户检查 PDF 后继续微调翻译源码。只有用户明确要求清理、或你已经完成必要检查且确认不再需要源码时，才调用：
 
 ```bash
 python3 {SKILL_DIR}/scripts/cleanup.py "$OUTPUT_DIR"
+```
+
+如果需要在清理前保留翻译后的 `.tex` / `.bbl`，使用：
+
+```bash
+python3 {SKILL_DIR}/scripts/cleanup.py "$OUTPUT_DIR" "$OUTPUT_DIR/translated-sources"
 ```
 
 多篇论文时，所有论文都完成 PDF 编译并保存后再进行中间文件清理。

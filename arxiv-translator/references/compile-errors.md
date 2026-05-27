@@ -14,6 +14,7 @@
 **编译“成功”但引用/交叉引用仍是问号**（PDF 里出现 `??` 或 `[?]`）
 → 这通常意味着编译过程里发生了 LaTeX 错误，但在 `nonstopmode` 下仍生成了 PDF，导致 `latexmk` 没能完成多次编译而解析引用/交叉引用。
 → 解决思路：开启 `-halt-on-error`（让错误直接失败并返回日志）并修复首个报错后重试。
+→ 若论文自带 `.bbl`，优先把 `.bbl` 内容内联到 `\bibliography{...}` 位置；不要再向 latex-on-http 发送 `options.bibliography`，该字段已被上游 API 移除。
 
 **宏包缺失** `File 'xxx.sty' not found`
 → 该包未安装在远程服务器上。可在 `https://latex.ytotech.com/packages` 查询可用包列表。若缺失，尝试注释掉该包或替换为等价的可用包。
@@ -22,7 +23,11 @@
 → preamble 中已包含 `\setlength{\emergencystretch}{3em}`，通常足够。若仍溢出，添加 `\sloppy`。
 
 **参考文献问题（bibtex/biber）**
-→ 确认 `.bib` 文件已存在于工作目录并被正确引用；若论文自带 `.bbl` 而没有 `.bib`，优先复用 `.bbl`。如需 biber，在请求中设置 `options.bibliography.command`。
+→ 确认 `.bib` 文件已存在于工作目录并被正确引用；若论文自带 `.bbl`，优先内联 `.bbl`，让远端单遍编译也能解析引用。
+→ 如果 `.bbl` 已被内联，可将 `options.compiler.bibliography` 设为 `false`，避免远端再次运行 BibTeX。
+
+**PDF 文本提取出现 `�`**
+→ 使用 pypdf 提取 CJK PDF 时出现 `�` 不一定是 PDF 缺字；FakeSlant 等字体特性可能影响 ToUnicode 回查。优先用 PyMuPDF 提取文本，或将页面渲染成 PNG 后目视检查。
 
 **远端编译超时 / 变慢**
 → 检查工作目录里是否混入了历史产物（尤其是无关的 PDF、`.aux`、`.log`、旧输出文件）。这些文件会被一并上传，显著拖慢远端编译，甚至导致超时。

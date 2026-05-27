@@ -1,0 +1,4 @@
+__pycache__/
+*.py[cod]
+.tmp_arxiv/
+inspect_*.txt

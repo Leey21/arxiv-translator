@@ -15,7 +15,7 @@ import requests
 
 
 _BIBLATEX_RE = re.compile(r"\\(?:usepackage(?:\[[^\]]*\])?\{biblatex\}|addbibresource\{)")
-_BIBTEX_CMD_RE = re.compile(r"\\bibliography\{")
+_BIBTEX_CMD_RE = re.compile(r"(?P<indent>^[ \t]*)\\bibliography\s*\{(?P<names>[^}]+)\}", re.MULTILINE)
 _THEBIB_RE = re.compile(r"\\begin\{thebibliography\}")
 _BBL_INPUT_RE = re.compile(r"\\(?:input|include)\s*\{[^}]+\.bbl\}")
 _CMD_ALREADY_DEFINED_RE = re.compile(r"LaTeX Error: Command \\([A-Za-z@]+) already defined")
@@ -61,12 +61,21 @@ _BUILD_ARTIFACT_EXTS = (
     ".ps",
 )
 _SKIP_FILENAMES = {"download.env"}
+_INLINED_BBL_MARKER = "% arxiv-translator: inlined prebuilt .bbl"
 _AUTO_CJK_PREAMBLE = "\n".join(
     (
         r"\usepackage{fontspec}",
         r"\usepackage{luatexja}",
         r"\usepackage{luatexja-fontspec}",
-        r"\setmainjfont{Noto Serif CJK SC}",
+        r"\setmainjfont{Noto Serif CJK SC}[%"
+        "\n"
+        r"  BoldFont=Noto Serif CJK SC,AutoFakeBold=2,%"
+        "\n"
+        r"  ItalicFont=Noto Serif CJK SC,ItalicFeatures={FakeSlant=0.2},%"
+        "\n"
+        r"  BoldItalicFont=Noto Serif CJK SC,BoldItalicFeatures={FakeSlant=0.2}%"
+        "\n"
+        r"]",
         "",
     )
 )
@@ -144,7 +153,13 @@ def _resolve_output_pdf(output_path, main_tex_rel):
     return output_path
 
 
-def _find_prebuilt_bbl(work_dir, main_rel):
+def _find_prebuilt_bbl(work_dir, main_rel, bibliography_names=None):
+    bibliography_names = bibliography_names or []
+    wanted_stems = []
+    for raw in bibliography_names:
+        stem = os.path.splitext(os.path.basename(raw.strip()))[0].lower()
+        if stem:
+            wanted_stems.append(stem)
     main_stem = os.path.splitext(os.path.basename(main_rel))[0].lower()
     bbl_files = []
     for _, rel in _iter_project_files(work_dir):
@@ -152,6 +167,10 @@ def _find_prebuilt_bbl(work_dir, main_rel):
             bbl_files.append(rel)
     if not bbl_files:
         return None
+    for wanted in wanted_stems:
+        for rel in bbl_files:
+            if os.path.splitext(os.path.basename(rel))[0].lower() == wanted:
+                return rel
     for rel in bbl_files:
         if os.path.splitext(os.path.basename(rel))[0].lower() == main_stem:
             return rel
@@ -160,33 +179,51 @@ def _find_prebuilt_bbl(work_dir, main_rel):
     return None
 
 
-def _detect_bibliography_setup(work_dir, main_rel):
-    tex_blob = "\n".join(
-        text for rel, text in _collect_source_texts(work_dir).items() if rel.lower().endswith(".tex")
-    )
-    has_bib_files = any(rel.lower().endswith(".bib") for _, rel in _iter_project_files(work_dir))
-    prebuilt_bbl = _find_prebuilt_bbl(work_dir, main_rel)
+def _split_bibliography_names(raw):
+    return [name.strip() for name in raw.split(",") if name.strip()]
+
+
+def _inline_prebuilt_bbl(work_dir, main_rel):
+    """Inline a shipped .bbl at \bibliography{...} for single-pass remote builds."""
+    source_texts = _collect_source_texts(work_dir)
+    tex_blob = "\n".join(text for rel, text in source_texts.items() if rel.lower().endswith(".tex"))
 
     if _BIBLATEX_RE.search(tex_blob):
-        return "biber", None
+        return False
+    if _THEBIB_RE.search(tex_blob) or _BBL_INPUT_RE.search(tex_blob) or _INLINED_BBL_MARKER in tex_blob:
+        return False
 
-    # If the document includes an explicit thebibliography environment, BibTeX is unnecessary.
-    # Running BibTeX in this case can fail (no .bib database) and leave citations unresolved ("?").
-    if _THEBIB_RE.search(tex_blob) or _BBL_INPUT_RE.search(tex_blob):
-        return None, None
+    changed = False
+    for rel, text in source_texts.items():
+        if not rel.lower().endswith(".tex"):
+            continue
 
-    # If the paper ships a ready-made .bbl but no .bib, reuse it directly.
-    # latex-on-http renames the main file to __main_document__.tex, so we mirror the
-    # prebuilt bibliography under the matching __main_document__.bbl name at upload time.
-    if _BIBTEX_CMD_RE.search(tex_blob):
-        if prebuilt_bbl and not has_bib_files:
-            return None, prebuilt_bbl
-        return "bibtex", None
+        def _replace(match):
+            nonlocal changed
+            names = _split_bibliography_names(match.group("names"))
+            bbl_rel = _find_prebuilt_bbl(work_dir, main_rel, names)
+            if not bbl_rel:
+                return match.group(0)
+            try:
+                bbl_text = _read_text(os.path.join(work_dir, bbl_rel)).strip()
+            except OSError:
+                return match.group(0)
+            changed = True
+            indent = match.group("indent") or ""
+            return (
+                f"{indent}{_INLINED_BBL_MARKER}: {bbl_rel}\n"
+                f"{indent}% {match.group(0).lstrip()}\n"
+                f"{bbl_text}\n"
+                f"{indent}% arxiv-translator: end inlined prebuilt .bbl"
+            )
 
-    if has_bib_files:
-        return "bibtex", None
+        new_text, n = _BIBTEX_CMD_RE.subn(_replace, text, count=1)
+        if n and new_text != text:
+            with open(os.path.join(work_dir, rel), "w", encoding="utf-8") as f:
+                f.write(new_text)
+            return True
 
-    return None, None
+    return changed
 
 
 def _detect_compiler(work_dir, main_rel):
@@ -436,8 +473,9 @@ def _should_skip_resource(rel_path, source_texts):
 def compile_online(work_dir, main_tex, output_path):
     work_dir, main_rel = _main_tex_relative(work_dir, main_tex)
     output_path = _resolve_output_pdf(output_path, main_rel)
-    bibliography_command, prebuilt_bbl = _detect_bibliography_setup(work_dir, main_rel)
     compiler = _detect_compiler(work_dir, main_rel)
+
+    bbl_inlined = False
 
     def _build_resources():
         # Rebuild every attempt so retries include any auto-fixes applied to source files.
@@ -460,19 +498,13 @@ def compile_online(work_dir, main_tex, output_path):
                 file=sys.stderr,
             )
             sys.exit(1)
-        if prebuilt_bbl and prebuilt_bbl != "__main_document__.bbl":
-            resources.append(
-                {
-                    "path": "__main_document__.bbl",
-                    "file": encode(os.path.join(work_dir, prebuilt_bbl)),
-                }
-            )
         return resources
 
     max_attempts = 3  # 1 initial + up to 2 auto-fix retries
     last_error = None
 
     for attempt in range(1, max_attempts + 1):
+        bbl_inlined = _inline_prebuilt_bbl(work_dir, main_rel) or bbl_inlined
         _ensure_cjk_support(work_dir, main_rel)
         # Preflight source tweaks that are almost always needed for Unicode stacks.
         _preflight_comment_inputenc_fontenc(work_dir, main_rel)
@@ -482,12 +514,12 @@ def compile_online(work_dir, main_tex, output_path):
             "compiler": compiler,
             "resources": resources,
             "options": {
-                "compiler": {"halt_on_error": True},
+                "compiler": {"halt_on_error": True, "silent": True},
                 "response": {"log_files_on_failure": True},
             },
         }
-        if bibliography_command:
-            payload["options"]["bibliography"] = {"command": bibliography_command}
+        if bbl_inlined:
+            payload["options"]["compiler"]["bibliography"] = False
 
         resp = requests.post(
             "https://latex.ytotech.com/builds/sync",
