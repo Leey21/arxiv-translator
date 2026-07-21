@@ -76,6 +76,21 @@ _AUTO_CJK_PREAMBLE = "\n".join(
         r"  BoldItalicFont=Noto Serif CJK SC,BoldItalicFeatures={FakeSlant=0.2}%"
         "\n"
         r"]",
+        r"\setsansjfont{Noto Sans CJK SC}[%"
+        "\n"
+        r"  BoldFont=Noto Sans CJK SC,AutoFakeBold=2,%"
+        "\n"
+        r"  ItalicFont=Noto Sans CJK SC,ItalicFeatures={FakeSlant=0.2},%"
+        "\n"
+        r"  BoldItalicFont=Noto Sans CJK SC,BoldItalicFeatures={FakeSlant=0.2}%"
+        "\n"
+        r"]",
+        r"\IfFontExistsTF{Iosevka}{\setmonofont{Iosevka}}{}",
+        r"\setmonojfont{Noto Sans Mono CJK SC}[%"
+        "\n"
+        r"  BoldFont=Noto Sans Mono CJK SC,AutoFakeBold=2%"
+        "\n"
+        r"]",
         "",
     )
 )
